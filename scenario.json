@@ -1,0 +1,61 @@
+{
+  "scenario_title": "電力需給バトル：新緑町グリッド",
+  "loop_scenario": true,
+  "events": [
+    {
+      "trigger_time_sec": 20,
+      "notice_time_sec": 10,
+      "duration_sec": 30,
+      "name": "春の行楽・連休",
+      "notice_msg": "【予告】連休で工場需要が大幅低下\n電力が余るため市場単価が下落します",
+      "active_msg": "【需要低下】電気が余っています！\n揚水(PUMP)で充電し余剰を吸収せよ",
+      "price_multiplier": 0.6,
+      "load_multiplier": 0.7,
+      "hydro_multiplier": 1.0
+    },
+    {
+      "trigger_time_sec": 65,
+      "notice_time_sec": 10,
+      "duration_sec": 35,
+      "name": "初夏の夕暮れ",
+      "notice_msg": "【予告】日没に伴い住宅需要が急増\n単価が高騰する見込みです",
+      "active_msg": "【需要急増】市場単価が高騰中！\n揚水(GEN)や火力増力で稼ぎまくれ！",
+      "price_multiplier": 1.5,
+      "load_multiplier": 1.4,
+      "hydro_multiplier": 1.0
+    },
+    {
+      "trigger_time_sec": 120,
+      "notice_time_sec": 12,
+      "duration_sec": 40,
+      "name": "集中豪雨と豊水",
+      "notice_msg": "【予告】上流で豪雨。水力発電が急増\n市場単価が暴落する見込みです",
+      "active_msg": "【豊水発生】水力フル稼働・単価暴落中\n余剰を揚水(PUMP)に急速チャージせよ",
+      "price_multiplier": 0.5,
+      "load_multiplier": 0.9,
+      "hydro_multiplier": 1.8
+    },
+    {
+      "trigger_time_sec": 180,
+      "notice_time_sec": 15,
+      "duration_sec": 45,
+      "name": "突発的寒波の襲来",
+      "notice_msg": "【予告】急激な寒波接近！暖房で逼迫\n単価が超高騰する見込みです！",
+      "active_msg": "【大寒波襲来】電力不足！超高単価！\n揚水全開(GEN)で一気に売電せよ！",
+      "price_multiplier": 2.2,
+      "load_multiplier": 1.6,
+      "hydro_multiplier": 0.8
+    },
+    {
+      "trigger_time_sec": 245,
+      "notice_time_sec": 10,
+      "duration_sec": 30,
+      "name": "大型工場の増産",
+      "notice_msg": "【予告】新製品増産のため重工業団地が\n突発フル稼働を開始します",
+      "active_msg": "【工場稼働】瞬間負荷大！\n周波数の急低下に厳重警戒せよ！",
+      "price_multiplier": 1.3,
+      "load_multiplier": 1.4,
+      "hydro_multiplier": 1.0
+    }
+  ]
+}

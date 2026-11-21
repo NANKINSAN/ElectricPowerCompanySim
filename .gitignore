@@ -1,0 +1,11 @@
+/__pycache__
+/cache
+/editing
+/output
+/output_test
+/tests
+/to_ai
+/editor_config.json
+__pycache__
+/dist
+/build
