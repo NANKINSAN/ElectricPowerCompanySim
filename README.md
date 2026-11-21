@@ -5,18 +5,45 @@ Pyxel（レトロゲームエンジン）で開発された2D電力需給・周�
 
 ---
 
-## 1. 起動方法
+## 1. 起動方法 & 開発環境のセットアップ
 
-### Python スクリプトとして起動する場合
-Anaconda環境 `GameEmv` を有効化し、`main.py` を実行します。
+本プロジェクトの開発は、**Anaconda（Conda）** を利用した仮想環境上で行われています。
+Python スクリプトとして起動・開発を行う場合は、以下の手順で仮想環境（例: `GameEmv`）を作成し、必要なライブラリをインストールしてください。
+
+### 事前準備: 仮想環境の作成とライブラリのインストール
+
+1. **Anaconda Prompt**（またはターミナル）を開きます。
+2. 仮想環境 `GameEmv` を作成します（Python 3.10〜3.12 推奨）：
+   ```bash
+   conda create -n GameEmv python=3.11 -y
+   ```
+3. 作成した仮想環境を有効化（アクティベート）します：
+   ```bash
+   conda activate GameEmv
+   ```
+4. ゲームの実行および exe ビルドに必要なライブラリをインストールします：
+   ```bash
+   pip install pyxel pyinstaller
+   ```
+   - **`pyxel`** : レトロゲームエンジン（描画・サウンド・入力制御）
+   - **`pyinstaller`** : exe 化配布用パッケージのビルドツール
+
+---
+
+### ゲームの起動方法
+
+#### 方法A: Python スクリプトから起動する場合
+仮想環境 `GameEmv` が有効な状態で、プロジェクト直下の `main.py` を実行します。
 
 ```bash
 conda activate GameEmv
 python main.py
 ```
+> ※ プロジェクト直下の **`start.bat`** をダブルクリックして起動することも可能です。
 
-### Windows exe アプリケーションとして起動する場合
-ビルド成果物 `dist/PowerGridSim/PowerGridSim.exe` をダブルクリックして起動できます。（Python環境のないPCでも動作します）
+#### 方法B: Windows exe アプリケーションとして起動する場合
+ビルド成果物 **`dist/PowerGridSim/PowerGridSim.exe`** をダブルクリックして起動できます。
+（Python や Conda 環境がインストールされていない別の PC でもそのまま動作します）
 
 ---
 
