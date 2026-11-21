@@ -1,8 +1,10 @@
 {
   "general": {
+    "screen_width": 480,
+    "screen_height": 360,
     "rated_frequency_hz": 60.0,
     "base_electricity_price": 30.0,
-    "initial_money": 100000,
+    "initial_money": 10000000,
     "fps": 30,
     "town_expansion_interval_sec": 45
   },
@@ -11,34 +13,45 @@
       "name": "初級 (Easy)",
       "freq_tolerance_hz": 0.8,
       "max_violation_duration_sec": 8.0,
-      "initial_money_bonus": 50000
+      "initial_money_bonus": 5000000,
+      "cost_multiplier": 0.7,
+      "construction_time_multiplier": 0.6,
+      "command_cooldown_sec": 0.5
     },
     "normal": {
       "name": "中級 (Normal)",
       "freq_tolerance_hz": 0.5,
       "max_violation_duration_sec": 5.0,
-      "initial_money_bonus": 0
+      "initial_money_bonus": 0,
+      "cost_multiplier": 1.0,
+      "construction_time_multiplier": 1.0,
+      "command_cooldown_sec": 1.5
     },
     "hard": {
       "name": "上級 (Hard)",
       "freq_tolerance_hz": 0.3,
       "max_violation_duration_sec": 3.0,
-      "initial_money_bonus": -30000
+      "initial_money_bonus": -4000000,
+      "cost_multiplier": 1.3,
+      "construction_time_multiplier": 1.5,
+      "command_cooldown_sec": 3.0
     }
   },
   "plant_types": {
     "thermal": {
       "name": "火力発電所",
       "desc": "出力を柔軟に調整可能。追従速度(ランプ速度)あり。",
-      "build_cost": 80000,
+      "build_cost": 8000000,
+      "construction_time_sec": 30.0,
       "max_output_mw": 80.0,
       "min_output_mw": 10.0,
-      "ramp_rate_mw_per_sec": 8.0
+      "ramp_rate_mw_per_sec": 3.5
     },
     "hydro": {
       "name": "流れ込み式水力発電所",
       "desc": "ベースロード。出力は川の流量で決まる。低運用コスト。",
-      "build_cost": 60000,
+      "build_cost": 6000000,
+      "construction_time_sec": 25.0,
       "max_output_mw": 40.0,
       "min_output_mw": 20.0,
       "ramp_rate_mw_per_sec": 2.0
@@ -46,7 +59,8 @@
     "pumped_storage": {
       "name": "揚水発電所",
       "desc": "発電と揚水(蓄電)の2モード。周波数と単価に合わせて充放電！",
-      "build_cost": 120000,
+      "build_cost": 12000000,
+      "construction_time_sec": 40.0,
       "max_output_mw": 70.0,
       "pump_load_mw": 75.0,
       "max_storage_mwh": 350.0,

@@ -47,6 +47,7 @@ class EventManager:
         self.banner_color = 7 # 白
         self.notice_sound_trigger = False
         self.event_sound_trigger = False
+        self.finish_sound_trigger = False
         
         self.load_scenario()
 
@@ -77,44 +78,58 @@ class EventManager:
         self.elapsed_time += dt
         self.notice_sound_trigger = False
         self.event_sound_trigger = False
+        self.finish_sound_trigger = False
         
+        # 単発通知タイマー
         if self.banner_timer > 0:
             self.banner_timer -= dt
             if self.banner_timer <= 0:
                 self.active_banner_msg = ""
 
-        # 倍率のリセット（デフォルト 1.0）
         active_event: ScenarioEvent | None = None
+        current_banner = ""
+        current_color = 7
 
         for ev in self.events:
             notice_start = ev.trigger_time - ev.notice_time
-            # 予告判定
-            if not ev.noticed and self.elapsed_time >= notice_start and self.elapsed_time < ev.trigger_time:
-                ev.noticed = True
-                self.active_banner_msg = ev.notice_msg
-                self.banner_timer = ev.notice_time
-                self.banner_color = 10 # 黄色
-                self.notice_sound_trigger = True
+            # 1. イベント事前予告（notice_time秒前から発生直前まで）
+            if notice_start <= self.elapsed_time < ev.trigger_time:
+                rem_notice = max(1, int(ev.trigger_time - self.elapsed_time + 0.9))
+                if not ev.noticed:
+                    ev.noticed = True
+                    self.notice_sound_trigger = True
+                current_banner = f"{ev.notice_msg} (あと{rem_notice}秒)"
+                current_color = 10 # 黄色
 
-            # イベント発生判定
-            if self.elapsed_time >= ev.trigger_time and self.elapsed_time < ev.trigger_time + ev.duration:
+            # 2. イベント発生中（trigger_time 〜 trigger_time + duration の全期間）
+            elif ev.trigger_time <= self.elapsed_time < ev.trigger_time + ev.duration:
+                rem_duration = max(1, int(ev.trigger_time + ev.duration - self.elapsed_time + 0.9))
                 if not ev.started:
                     ev.started = True
-                    self.active_banner_msg = ev.active_msg
-                    self.banner_timer = 6.0
-                    self.banner_color = 8 # 赤/マゼンタ (単価高) または 11 (単価安)
-                    if ev.price_multiplier < 1.0:
-                        self.banner_color = 12 # シアン/水色 (余剰)
                     self.event_sound_trigger = True
+                
+                # イベント発生中ずっとメッセージを表示
+                current_banner = f"【イベント: {ev.name}】残り{rem_duration}秒 (単価x{ev.price_multiplier:.2f}, 需要x{ev.load_multiplier:.2f})\n{ev.active_msg}"
+                current_color = 8 # 赤
+                if ev.price_multiplier < 1.0:
+                    current_color = 12 # シアン (電力余剰・単価下落)
+                elif ev.price_multiplier > 1.0:
+                    current_color = 9 # オレンジ/高単価
+
                 active_event = ev
                 break
 
-            # 終了判定
-            if ev.started and not ev.finished and self.elapsed_time >= ev.trigger_time + ev.duration:
+            # 3. イベント終了判定
+            elif ev.started and not ev.finished and self.elapsed_time >= ev.trigger_time + ev.duration:
                 ev.finished = True
-                self.active_banner_msg = f"【終了】{ev.name} が終了し、需給が通常状態に戻りました。"
-                self.banner_timer = 4.0
+                self.active_banner_msg = f"【終了】「{ev.name}」が終了し、需給が通常状態に復旧しました。"
+                self.banner_timer = 5.0
                 self.banner_color = 7
+                self.finish_sound_trigger = True
+
+        if current_banner:
+            self.active_banner_msg = current_banner
+            self.banner_color = current_color
 
         if active_event:
             self.current_price_multiplier = active_event.price_multiplier

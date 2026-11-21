@@ -4,6 +4,43 @@
 """
 import math
 
+class Substation:
+    """中央変電所オブジェクト：電力系統の中心ハブであり、全系統の送受電の遮断・復旧を統括"""
+    def __init__(self, x: int = 200, y: int = 150, command_cooldown_sec: float = 1.5):
+        self.id = "substation"
+        self.name = "中央変電所"
+        self.substation_type = "central"
+        self.x = x
+        self.y = y
+        self.w = 20
+        self.h = 20
+        self.is_connected = True  # True: 正常送受電中, False: 全送受電遮断中
+        self.pending_connected = True
+        self.command_cooldown_sec = command_cooldown_sec
+        self.cooldown_timer = 0.0
+
+    def can_operate(self) -> bool:
+        return self.cooldown_timer <= 0.0
+
+    def trigger_cooldown(self):
+        self.cooldown_timer = self.command_cooldown_sec
+
+    def update(self, dt: float):
+        if self.cooldown_timer > 0.0:
+            self.cooldown_timer = max(0.0, self.cooldown_timer - dt)
+
+    def toggle_pending_connection(self):
+        if self.can_operate():
+            self.pending_connected = not self.pending_connected
+
+    def commit_command(self) -> bool:
+        if not self.can_operate():
+            return False
+        self.is_connected = self.pending_connected
+        self.trigger_cooldown()
+        return True
+
+
 class PowerLine:
     def __init__(self, line_id: str, name: str, node_a: tuple[int, int], node_b: tuple[int, int],
                  capacity_mw: float = 120.0, obj_a_id: str = "", obj_b_id: str = ""):
@@ -29,9 +66,10 @@ class PowerLine:
 
 class GridNetwork:
     """電力系統ネットワーク全体のトポロジーと潮流計算"""
-    def __init__(self):
-        # 中央ハブ（変電所）座標
-        self.substation_pos = (130, 115)
+    def __init__(self, command_cooldown_sec: float = 1.5):
+        # 中央ハブ（変電所）
+        self.substation = Substation(200, 150, command_cooldown_sec=command_cooldown_sec)
+        self.substation_pos = (self.substation.x, self.substation.y)
         self.substation_name = "中央変電所 (Central Hub)"
         self.lines: list[PowerLine] = []
 
@@ -72,6 +110,13 @@ class GridNetwork:
 
     def update_flows(self, plants_dict: dict, consumers_dict: dict, dt: float):
         """各電線の潮流を計算"""
+        # 変電所の送受電停止中：全電線の潮流が0MW
+        if not self.substation.is_connected:
+            for line in self.lines:
+                line.flow_mw = 0.0
+                line.update_anim(dt)
+            return
+
         # 発電所から変電所への流入潮流
         # 揚水がPUMPの場合は変電所から発電所へ逆流（負の潮流）
         for line in self.lines:
