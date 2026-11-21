@@ -31,13 +31,23 @@ def build():
     dist_dir = os.path.join("dist", "PowerGridSim")
     print(f"\n[INFO] 配布フォルダ '{dist_dir}' を整備しています...")
 
-    # 2. ユーザーが外部から編集できるように config.json, scenario.json, README.md をコピー
-    files_to_copy = ["config.json", "scenario.json", "README.md"]
+    # 2. ユーザーが外部から編集できるように config.json, scenario.json をコピー
+    files_to_copy = ["config.json", "scenario.json"]
     for f in files_to_copy:
         if os.path.exists(f):
             dest = os.path.join(dist_dir, f)
             shutil.copy2(f, dest)
             print(f"  -> コピー完了: {f}")
+
+    # 3. プレイヤー向け説明書 (README_PLAYER.md) を配布用の README.md としてコピー
+    if os.path.exists("README_PLAYER.md"):
+        dest_readme = os.path.join(dist_dir, "README.md")
+        shutil.copy2("README_PLAYER.md", dest_readme)
+        print("  -> コピー完了: README_PLAYER.md -> dist/README.md (プレイヤー向け説明書)")
+    elif os.path.exists("README.md"):
+        dest_readme = os.path.join(dist_dir, "README.md")
+        shutil.copy2("README.md", dest_readme)
+        print("  -> コピー完了: README.md")
 
     # assets フォルダも念のため配置（ユーザーが追加アセットを入れられるように）
     dest_assets = os.path.join(dist_dir, "assets")
