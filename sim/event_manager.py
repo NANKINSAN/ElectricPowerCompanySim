@@ -51,6 +51,13 @@ class EventManager:
         
         self.load_scenario()
 
+    def load_custom_events(self, events_data: list[dict], loop: bool = True):
+        """外部から与えられたイベントデータリストをロード（ストーリーモード用）"""
+        self.loop_scenario = loop
+        self.events = [ScenarioEvent(item) for item in events_data]
+        self.events.sort(key=lambda e: e.trigger_time)
+        self.reset()
+
     def load_scenario(self):
         if not os.path.exists(self.scenario_path):
             print(f"Warning: {self.scenario_path} not found. Using defaults.")

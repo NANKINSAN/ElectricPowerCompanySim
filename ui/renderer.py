@@ -104,6 +104,13 @@ class GameRenderer:
             pyxel.rectb(0, bar_y, 480, bar_h, 7 if is_hovered else 9)
             pyxel.rect(0, bar_y, 4, bar_h, 9)
             self.draw_text(8, bar_y + 2, "⏸ 時間停止中 : 設備クリックで指令 / 空き地・右クリックで時間再開", 10, max_width=370)
+        elif sim_state.get('story_goal_text'):
+            # ストーリーモードのクリア条件・進捗バー
+            pyxel.rect(0, bar_y, 480, bar_h, 0)
+            pyxel.rectb(0, bar_y, 480, bar_h, 7 if is_hovered else 11)
+            pyxel.rect(0, bar_y, 4, bar_h, 11)
+            goal_txt = f"★【クリア目標】{sim_state['story_goal_text']}"
+            self.draw_text(8, bar_y + 2, goal_txt, 11, max_width=370)
         else:
             # 通常稼働時
             pyxel.rect(0, bar_y, 480, bar_h, 0)
@@ -903,3 +910,135 @@ class GameRenderer:
         pyxel.rect(can_x, can_y, can_w, can_h, 5 if can_hover else 0)
         pyxel.rectb(can_x, can_y, can_w, can_h, 7 if can_hover else 5)
         self.draw_text(can_x + 18, can_y + 7, "[ キャンセル / 閉じる (ESC) ]", 7)
+
+    def draw_stage_briefing(self, stage_data: dict, total_stages: int, mx: int, my: int):
+        """ストーリーモード ステージ開始前ブリーフィング画面を描画"""
+        # 背景
+        pyxel.rect(0, 0, 480, 360, 1)
+
+        wx, wy, ww, wh = 20, 10, 440, 340
+        pyxel.rect(wx, wy, ww, wh, 0)
+        pyxel.rectb(wx, wy, ww, wh, 11)
+
+        # 1. ヘッダーバー (y: 10〜30)
+        pyxel.rect(wx, wy, ww, 20, 5)
+        self.draw_text(wx + 10, wy + 4, f"★ 初級ストーリーモード 【 第{stage_data['stage_id']}話 / 全{total_stages}話 】", 10)
+        self.draw_text(wx + ww - 145, wy + 4, "[ A/D または <-/-> : 切替 ]", 7)
+
+        # 2. タイトル・サブタイトル (y: 34〜56)
+        self.draw_text(wx + 14, wy + 24, stage_data["title"], 7)
+        self.draw_text(wx + 14, wy + 37, f"-- {stage_data['subtitle']} --", 11)
+
+        # 3. あらすじボックス (y: 60〜120)
+        bx = wx + 10
+        bw = ww - 20
+        syn_y = wy + 52
+        syn_h = 60
+        pyxel.rect(bx, syn_y, bw, syn_h, 1)
+        pyxel.rectb(bx, syn_y, bw, syn_h, 5)
+        self.draw_text(bx + 8, syn_y + 4, "【 あらすじ・状況説明 】", 10)
+        self.draw_text(bx + 8, syn_y + 18, stage_data["synopsis"], 7, line_spacing=12, max_width=bw - 16)
+
+        # 4. 発生予定イベントボックス (y: 126〜192)
+        ev_y = syn_y + syn_h + 6
+        ev_h = 66
+        pyxel.rect(bx, ev_y, bw, ev_h, 1)
+        pyxel.rectb(bx, ev_y, bw, ev_h, 8)
+        self.draw_text(bx + 8, ev_y + 4, "【 発生予定の系統イベント（あらすじ） 】", 9)
+        self.draw_text(bx + 8, ev_y + 18, stage_data["events_desc"], 12, line_spacing=12, max_width=bw - 16)
+
+        # 5. ステージクリア条件ボックス (y: 198〜242)
+        cond_y = ev_y + ev_h + 6
+        cond_h = 44
+        pyxel.rect(bx, cond_y, bw, cond_h, 1)
+        pyxel.rectb(bx, cond_y, bw, cond_h, 10)
+        self.draw_text(bx + 8, cond_y + 4, "★【 ステージクリア条件 】★", 10)
+        self.draw_text(bx + 18, cond_y + 17, f"・ 達成目標 : {stage_data['condition_desc']}", 11)
+        self.draw_text(bx + 18, cond_y + 29, "・ 系統条件 : 周波数逸脱によるブラックアウト（大停電）を起こさないこと", 7)
+
+        # 6. アクションボタン群 (y: 250〜274)
+        btn_y = cond_y + cond_h + 8
+        btn_h = 24
+
+        # [ < 前話 (Left) ]
+        btn_prev_x = bx
+        btn_prev_w = 95
+        prev_hover = (btn_prev_x <= mx <= btn_prev_x + btn_prev_w and btn_y <= my <= btn_y + btn_h)
+        pyxel.rect(btn_prev_x, btn_y, btn_prev_w, btn_h, 5 if prev_hover else 0)
+        pyxel.rectb(btn_prev_x, btn_y, btn_prev_w, btn_h, 7 if prev_hover else 5)
+        self.draw_text(btn_prev_x + 12, btn_y + 7, "< 前話 (Left)", 7 if not prev_hover else 10)
+
+        # [ 運用開始 (中央) ]
+        btn_start_x = btn_prev_x + btn_prev_w + 12
+        btn_start_w = 206
+        start_hover = (btn_start_x <= mx <= btn_start_x + btn_start_w and btn_y <= my <= btn_y + btn_h)
+        s_bg = 3 if start_hover else 1
+        s_border = 10 if (pyxel.frame_count % 20 < 10 or start_hover) else 11
+        pyxel.rect(btn_start_x, btn_y, btn_start_w, btn_h, s_bg)
+        pyxel.rectb(btn_start_x, btn_y, btn_start_w, btn_h, s_border)
+        self.draw_text(btn_start_x + 22, btn_y + 7, "[ 運用開始 (Enter / Space) ]", 11 if start_hover else 10)
+
+        # [ 次話 > (Right) ]
+        btn_next_x = btn_start_x + btn_start_w + 12
+        btn_next_w = 95
+        next_hover = (btn_next_x <= mx <= btn_next_x + btn_next_w and btn_y <= my <= btn_y + btn_h)
+        pyxel.rect(btn_next_x, btn_y, btn_next_w, btn_h, 5 if next_hover else 0)
+        pyxel.rectb(btn_next_x, btn_y, btn_next_w, btn_h, 7 if next_hover else 5)
+        self.draw_text(btn_next_x + 12, btn_y + 7, "次話 > (Right)", 7 if not next_hover else 10)
+
+        # フッターガイド
+        self.draw_text(wx + 155, wy + wh - 14, "[ ESC : タイトル画面へ戻る ]", 6)
+
+    def draw_stage_clear(self, stage_data: dict, total_stages: int, score: float, money: float, time_sec: float, energy_kwh: float, mx: int, my: int):
+        """ステージクリア画面を描画"""
+        is_all_clear = (stage_data["stage_id"] >= total_stages)
+
+        gx, gy, gw, gh = 55, 30, 370, 300
+        pyxel.rect(gx, gy, gw, gh, 0)
+        pyxel.rectb(gx, gy, gw, gh, 10 if is_all_clear else 11)
+
+        # ヘッダー
+        if is_all_clear:
+            self.draw_text(gx + 92, gy + 14, "=== ALL STAGES CLEAR!! ===", 10)
+            self.draw_text(gx + 108, gy + 28, "伝説の最高電力司令塔", 11)
+        else:
+            self.draw_text(gx + 106, gy + 14, "=== STAGE CLEAR!! ===", 11)
+            self.draw_text(gx + 75, gy + 28, f"{stage_data['title']} 達成！", 10)
+
+        # 司令官からのメッセージボックス
+        msg_y = gy + 48
+        msg_w = gw - 30
+        msg_x = gx + 15
+        pyxel.rect(msg_x, msg_y, msg_w, 56, 1)
+        pyxel.rectb(msg_x, msg_y, msg_w, 56, 3)
+        self.draw_text(msg_x + 10, msg_y + 6, "🎖️ 【 司令塔への評価・表彰 】", 10)
+        self.draw_text(msg_x + 10, msg_y + 20, stage_data["clear_msg"], 7, line_spacing=12, max_width=msg_w - 20)
+
+        # 実績サマリー
+        stat_y = msg_y + 64
+        self.draw_text(gx + 35, stat_y, f"クリア所要時間 : {int(time_sec)} 秒", 7)
+        self.draw_text(gx + 35, stat_y + 15, f"供給総電力量   : {int(energy_kwh):,} kWh", 7)
+        self.draw_text(gx + 35, stat_y + 30, f"累積売電収益   : ¥{int(score):,}", 10)
+        self.draw_text(gx + 35, stat_y + 45, f"達成時所持金   : ¥{int(money):,}", 11)
+
+        # クリア条件表示
+        pyxel.rect(gx + 30, stat_y + 64, gw - 60, 20, 1)
+        pyxel.rectb(gx + 30, stat_y + 64, gw - 60, 20, 5)
+        self.draw_text(gx + 38, stat_y + 70, f"達成目標: {stage_data['condition_desc']}", 10)
+
+        # アクションボタン
+        btn_y = gy + gh - 46
+        btn_w = 230
+        btn_x = gx + (gw - btn_w) // 2
+        btn_hover = (btn_x <= mx <= btn_x + btn_w and btn_y <= my <= btn_y + 24)
+
+        pyxel.rect(btn_x, btn_y, btn_w, 24, 3 if btn_hover else 1)
+        pyxel.rectb(btn_x, btn_y, btn_w, 24, 11 if btn_hover else 10)
+
+        if is_all_clear:
+            self.draw_text(btn_x + 22, btn_y + 7, "[ タイトルへ戻る (Enter / Click) ]", 11 if btn_hover else 10)
+        else:
+            self.draw_text(btn_x + 20, btn_y + 7, "[ 次のステージへ (Enter / Click) ]", 11 if btn_hover else 10)
+
+        self.draw_text(gx + 125, gy + gh - 16, "[ ESC キー : タイトルへ ]", 6)
+

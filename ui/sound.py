@@ -66,6 +66,14 @@ class SoundManager:
             effects="s",
             speed=6
         )
+        # 7: ステージクリア（ファンファーレ）
+        pyxel.sounds[7].set(
+            notes="c3 e3 g3 c4 e4 g4 e4 c4",
+            tones="t",
+            volumes="6",
+            effects="f",
+            speed=8
+        )
 
     def play_click(self):
         if not self.muted:
@@ -95,3 +103,7 @@ class SoundManager:
     def play_build(self):
         if not self.muted:
             pyxel.play(0, 6)
+
+    def play_clear(self):
+        if not self.muted:
+            pyxel.play(0, 7)

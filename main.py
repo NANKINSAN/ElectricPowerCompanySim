@@ -16,11 +16,14 @@ from ui.sound import SoundManager
 from ui.renderer import GameRenderer
 from ui.controls import Button, Slider
 from utils.resource import get_config_path, get_resource_path
+from sim.story_stages import STORY_STAGES, get_stage, check_stage_clear
 
 class GameState:
     TITLE = 0
     PLAYING = 1
     GAMEOVER = 2
+    STAGE_BRIEFING = 3
+    STAGE_CLEAR = 4
 
 class PowerGridApp:
     def __init__(self):
@@ -38,9 +41,12 @@ class PowerGridApp:
         self.sound = SoundManager()
         self.renderer = GameRenderer()
 
-        # 4. ゲーム状態・難易度
+        # 4. ゲーム状態・難易度・ストーリーモード管理
         self.state = GameState.TITLE
         self.difficulty_key = "normal"
+        self.is_story_mode = False
+        self.current_stage_idx = 0
+        self.story_goal_text = ""
         self.selected_obj = None
         self.hovered_obj = None
         self.is_manual_paused = False
@@ -127,9 +133,9 @@ class PowerGridApp:
         self.buttons["btn_buy_pumped"]  = Button(315, panel_y + 66, 155, 18, "+揚水 (3)", 2, 7, 10, font=f, shortcut_key=(pyxel.KEY_3, pyxel.KEY_C))
 
         # タイトル画面用 難易度選択ボタン
-        self.buttons["title_easy"]   = Button(170, 140, 140, 20, "初級 (1)", 1, 7, 11, font=f, shortcut_key=pyxel.KEY_1)
-        self.buttons["title_normal"] = Button(170, 166, 140, 20, "中級 (2)", 1, 7, 10, font=f, shortcut_key=pyxel.KEY_2)
-        self.buttons["title_hard"]   = Button(170, 192, 140, 20, "上級 (3)", 1, 7, 8, font=f, shortcut_key=pyxel.KEY_3)
+        self.buttons["title_easy"]   = Button(150, 140, 180, 20, "初級 (ストーリー全5話) (1)", 1, 7, 11, font=f, shortcut_key=pyxel.KEY_1)
+        self.buttons["title_normal"] = Button(150, 166, 180, 20, "中級 (フリーモード) (2)", 1, 7, 10, font=f, shortcut_key=pyxel.KEY_2)
+        self.buttons["title_hard"]   = Button(150, 192, 180, 20, "上級 (フリーモード) (3)", 1, 7, 8, font=f, shortcut_key=pyxel.KEY_3)
 
     def _update_buy_buttons_text(self):
         diff_info = self.config.get("difficulties", {}).get(self.difficulty_key, {})
@@ -169,6 +175,7 @@ class PowerGridApp:
         return (x, y)
 
     def start_game(self, diff_key: str):
+        self.is_story_mode = False
         self.difficulty_key = diff_key
         diff_info = self.config.get("difficulties", {}).get(diff_key, {})
         rated_f = self.config.get("general", {}).get("rated_frequency_hz", 60.0)
@@ -229,13 +236,87 @@ class PowerGridApp:
         diff_name = diff_info.get("name", "通常")
         self.add_message_log(0.0, "SYSTEM", f"【系統運用開始】難易度: {diff_name} にて電力運用シミュレーションを開始しました。", 11)
 
+    def start_story_stage(self, stage_idx: int):
+        """初級ストーリーモードの特定ステージを開始"""
+        self.is_story_mode = True
+        self.current_stage_idx = stage_idx
+        stage_data = STORY_STAGES[stage_idx]
+
+        # 初級(easy)難易度設定を適用
+        self.difficulty_key = "easy"
+        diff_info = self.config.get("difficulties", {}).get("easy", {})
+        rated_f = self.config.get("general", {}).get("rated_frequency_hz", 60.0)
+        base_price = self.config.get("general", {}).get("base_electricity_price", 30.0)
+        init_money = stage_data.get("initial_money", 15000000)
+        expand_interval = self.config.get("general", {}).get("town_expansion_interval_sec", 45)
+        cooldown_sec = diff_info.get("command_cooldown_sec", 0.5)
+
+        # 周波数システム
+        tol = diff_info.get("freq_tolerance_hz", 0.8)
+        max_dur = diff_info.get("max_violation_duration_sec", 8.0)
+        self.freq_sys = FrequencySystem(rated_freq=rated_f, tolerance=tol, max_violation_sec=max_dur)
+
+        # 経済システム
+        self.economy = EconomySystem(base_price=base_price, initial_money=init_money)
+
+        # イベントマネージャーにステージ専用イベントを設定
+        self.event_mgr = EventManager("scenario.json")
+        self.event_mgr.load_custom_events(stage_data["events"], loop=True)
+
+        # 難易度に応じた新設ボタンのテキスト更新
+        self._update_buy_buttons_text()
+
+        # 発電所初期構成
+        p_configs = self.config.get("plant_types", {})
+        pos_t1 = self._get_plant_position("thermal", 0)
+        pos_h1 = self._get_plant_position("hydro", 0)
+        pos_p1 = self._get_plant_position("pumped_storage", 0)
+
+        self.plants = [
+            ThermalPlant("thermal_1", "中央火力1号", pos_t1[0], pos_t1[1], p_configs.get("thermal", {}), construction_time_sec=0.0, command_cooldown_sec=cooldown_sec),
+            HydroPlant("hydro_1", "上流第1水力", pos_h1[0], pos_h1[1], p_configs.get("hydro", {}), construction_time_sec=0.0, command_cooldown_sec=cooldown_sec),
+            PumpedStoragePlant("pumped_1", "黒岳揚水所", pos_p1[0], pos_p1[1], p_configs.get("pumped_storage", {}), construction_time_sec=0.0, command_cooldown_sec=cooldown_sec)
+        ]
+
+        # 需要家・町発展
+        self.town_mgr = TownManager(expansion_interval=expand_interval)
+        for c in self.town_mgr.consumers:
+            c.command_cooldown_sec = cooldown_sec
+
+        # 送電網
+        self.grid = GridNetwork(command_cooldown_sec=cooldown_sec)
+        self.grid.build_network(self.plants, self.town_mgr.consumers)
+
+        self.selected_obj = None
+        self.is_manual_paused = False
+        self.state = GameState.PLAYING
+        self.alarm_sound_timer = 0.0
+        self.construction_msg = ""
+        self.construction_msg_timer = 0.0
+
+        # メッセージ履歴の初期化
+        self.message_logs.clear()
+        self.is_showing_log = False
+        self.log_scroll_y = 0
+        self.is_showing_substation_modal = False
+        self.substation_tab = 0
+        self.substation_scroll_y = 0
+
+        self.story_goal_text = stage_data["condition_desc"]
+        self.add_message_log(0.0, "STORY", f"【開始】{stage_data['title']}：{stage_data['subtitle']}", 10)
+        self.add_message_log(0.0, "GOAL", f"【目標】クリア条件: {stage_data['condition_desc']}", 11)
+
     def update(self):
         mx, my = pyxel.mouse_x, pyxel.mouse_y
 
         if self.state == GameState.TITLE:
             self._update_title(mx, my)
+        elif self.state == GameState.STAGE_BRIEFING:
+            self._update_stage_briefing(mx, my)
         elif self.state == GameState.PLAYING:
             self._update_playing(mx, my)
+        elif self.state == GameState.STAGE_CLEAR:
+            self._update_stage_clear(mx, my)
         elif self.state == GameState.GAMEOVER:
             self._update_gameover(mx, my)
 
@@ -246,8 +327,89 @@ class PowerGridApp:
             if btn.is_pressed():
                 diff = k.replace("title_", "")
                 self.sound.play_click()
-                self.start_game(diff)
+                if diff == "easy":
+                    # 初級はストーリーモード画面へ遷移
+                    self.is_story_mode = True
+                    self.current_stage_idx = 0
+                    self.state = GameState.STAGE_BRIEFING
+                else:
+                    self.start_game(diff)
                 return
+
+    def _update_stage_briefing(self, mx: int, my: int):
+        """ステージ開始前画面の操作"""
+        # ESCでタイトル画面に戻る
+        if pyxel.btnp(pyxel.KEY_ESCAPE):
+            self.sound.play_click()
+            self.state = GameState.TITLE
+            return
+
+        # 左右キーまたはA/Dでステージ切り替え
+        if pyxel.btnp(pyxel.KEY_LEFT) or pyxel.btnp(pyxel.KEY_A):
+            if self.current_stage_idx > 0:
+                self.current_stage_idx -= 1
+                self.sound.play_switch()
+            return
+        if pyxel.btnp(pyxel.KEY_RIGHT) or pyxel.btnp(pyxel.KEY_D):
+            if self.current_stage_idx < len(STORY_STAGES) - 1:
+                self.current_stage_idx += 1
+                self.sound.play_switch()
+            return
+
+        # Enter または Space でステージ開始
+        if pyxel.btnp(pyxel.KEY_RETURN) or pyxel.btnp(pyxel.KEY_KP_ENTER) or pyxel.btnp(pyxel.KEY_SPACE):
+            self.sound.play_click()
+            self.start_story_stage(self.current_stage_idx)
+            return
+
+        # マウスクリック判定 (y: 248〜276)
+        if pyxel.btnp(pyxel.MOUSE_BUTTON_LEFT):
+            # [ < 前話 (Left) ]
+            if 30 <= mx <= 125 and 248 <= my <= 276:
+                if self.current_stage_idx > 0:
+                    self.current_stage_idx -= 1
+                    self.sound.play_switch()
+                return
+
+            # [ 運用開始 (Enter / Space) ]
+            if 137 <= mx <= 343 and 248 <= my <= 276:
+                self.sound.play_click()
+                self.start_story_stage(self.current_stage_idx)
+                return
+
+            # [ 次話 > (Right) ]
+            if 355 <= mx <= 450 and 248 <= my <= 276:
+                if self.current_stage_idx < len(STORY_STAGES) - 1:
+                    self.current_stage_idx += 1
+                    self.sound.play_switch()
+                return
+
+    def _update_stage_clear(self, mx: int, my: int):
+        """ステージクリア画面の操作"""
+        if pyxel.btnp(pyxel.KEY_ESCAPE):
+            self.sound.play_click()
+            self.state = GameState.TITLE
+            return
+
+        is_all_clear = (self.current_stage_idx + 1 >= len(STORY_STAGES))
+
+        # Enter / Space / クリックで次へ
+        proceed = (pyxel.btnp(pyxel.KEY_RETURN) or 
+                   pyxel.btnp(pyxel.KEY_KP_ENTER) or 
+                   pyxel.btnp(pyxel.KEY_SPACE))
+
+        if pyxel.btnp(pyxel.MOUSE_BUTTON_LEFT):
+            # ボタン領域: gx=55, gw=370, btn_w=230, btn_x=125, btn_y=284, btn_h=24
+            if 125 <= mx <= 355 and 284 <= my <= 308:
+                proceed = True
+
+        if proceed:
+            self.sound.play_click()
+            if is_all_clear:
+                self.state = GameState.TITLE
+            else:
+                self.current_stage_idx += 1
+                self.state = GameState.STAGE_BRIEFING
 
     def _update_message_log_modal(self, mx: int, my: int) -> bool:
         """メッセージログ表示中の入力処理。ログ表示中ならTrueを返す"""
@@ -579,6 +741,18 @@ class PowerGridApp:
         if dt > 0.0:
             self.economy.update(supplied_mw, actual_pump_mw, dt)
 
+            # ストーリーモードのクリア判定
+            if self.is_story_mode and self.state == GameState.PLAYING:
+                stg = STORY_STAGES[self.current_stage_idx]
+                cleared, progress = check_stage_clear(stg, self.plants, self.economy.money, self.event_mgr.elapsed_time)
+                self.story_goal_text = f"{stg['condition_desc']} ({progress})"
+                if cleared:
+                    self.sound.play_clear()
+                    self.add_message_log(self.event_mgr.elapsed_time, "CLEAR", f"【ステージクリア】{stg['title']} を達成しました！", 10)
+                    self.state = GameState.STAGE_CLEAR
+                    self.selected_obj = None
+                    return
+
         # 7. UI インタラクション (クリック・選択・スライダー・キー操作)
         self._handle_ui_input(mx, my)
 
@@ -859,15 +1033,25 @@ class PowerGridApp:
         # GameOver後の再挑戦は右クリックまたはRキー
         if pyxel.btnp(pyxel.KEY_R) or pyxel.btnp(pyxel.MOUSE_BUTTON_RIGHT):
             self.sound.play_click()
-            self.start_game(self.difficulty_key)
+            if self.is_story_mode:
+                self.start_story_stage(self.current_stage_idx)
+            else:
+                self.start_game(self.difficulty_key)
 
     def draw(self):
         pyxel.cls(0)
 
         if self.state == GameState.TITLE:
             self._draw_title()
-        elif self.state in (GameState.PLAYING, GameState.GAMEOVER):
-            diff_name = self.config.get("difficulties", {}).get(self.difficulty_key, {}).get("name", "通常")
+        elif self.state == GameState.STAGE_BRIEFING:
+            self.renderer.draw_stage_briefing(
+                STORY_STAGES[self.current_stage_idx],
+                len(STORY_STAGES),
+                pyxel.mouse_x,
+                pyxel.mouse_y
+            )
+        elif self.state in (GameState.PLAYING, GameState.STAGE_CLEAR, GameState.GAMEOVER):
+            diff_name = "初級 (ストーリー)" if self.is_story_mode else self.config.get("difficulties", {}).get(self.difficulty_key, {}).get("name", "通常")
             
             # バナーメッセージの統合（発電・需要オブジェクトと被らないよう1行固定表示）
             banner = ""
@@ -909,7 +1093,8 @@ class PowerGridApp:
                 "difficulty_name": diff_name,
                 "banner_msg": banner,
                 "banner_color": b_color,
-                "is_paused": is_paused
+                "is_paused": is_paused,
+                "story_goal_text": self.story_goal_text if self.is_story_mode else ""
             }
 
             next_exp = self.town_mgr.next_expansion if self.town_mgr.is_noticing else None
@@ -927,6 +1112,19 @@ class PowerGridApp:
             if self.state == GameState.GAMEOVER:
                 self.renderer.draw_game_over(
                     score=self.economy.total_sales_revenue,
+                    time_sec=self.event_mgr.elapsed_time,
+                    energy_kwh=self.economy.total_energy_kwh,
+                    mx=pyxel.mouse_x,
+                    my=pyxel.mouse_y
+                )
+
+            if self.state == GameState.STAGE_CLEAR:
+                stg = STORY_STAGES[self.current_stage_idx]
+                self.renderer.draw_stage_clear(
+                    stage_data=stg,
+                    total_stages=len(STORY_STAGES),
+                    score=self.economy.total_sales_revenue,
+                    money=self.economy.money,
                     time_sec=self.event_mgr.elapsed_time,
                     energy_kwh=self.economy.total_energy_kwh,
                     mx=pyxel.mouse_x,
@@ -959,7 +1157,7 @@ class PowerGridApp:
         self.renderer.draw_text(85, 72, "周波数 60.00Hz を維持して電力系統崩壊 (大停電) を防ごう！\n市場単価の高騰時に発電し、余剰時には揚水充電して売電収益を最大化！", 11, line_spacing=14)
 
         # 難易度ボタン
-        self.renderer.draw_text(192, 122, "- 難易度を選択 -", 6)
+        self.renderer.draw_text(176, 122, "- モード／難易度を選択 -", 6)
         self.buttons["title_easy"].draw()
         self.buttons["title_normal"].draw()
         self.buttons["title_hard"].draw()
