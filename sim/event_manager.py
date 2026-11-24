@@ -34,7 +34,8 @@ class EventManager:
         self.scenario_path = get_config_path(scenario_filename)
         self.events: list[ScenarioEvent] = []
         self.loop_scenario = True
-        self.elapsed_time = 0.0
+        self.elapsed_time = 0.0      # ゲーム全体の通算経過時間（リセットされない）
+        self.scenario_time = 0.0     # シナリオイベント進行・ループ用タイマー
         
         # 現在適用中の倍率
         self.current_price_multiplier = 1.0
@@ -73,6 +74,7 @@ class EventManager:
 
     def reset(self):
         self.elapsed_time = 0.0
+        self.scenario_time = 0.0
         self.current_price_multiplier = 1.0
         self.current_load_multiplier = 1.0
         self.current_hydro_multiplier = 1.0
@@ -83,6 +85,7 @@ class EventManager:
 
     def update(self, dt: float):
         self.elapsed_time += dt
+        self.scenario_time += dt
         self.notice_sound_trigger = False
         self.event_sound_trigger = False
         self.finish_sound_trigger = False
@@ -100,8 +103,8 @@ class EventManager:
         for ev in self.events:
             notice_start = ev.trigger_time - ev.notice_time
             # 1. イベント事前予告（notice_time秒前から発生直前まで）
-            if notice_start <= self.elapsed_time < ev.trigger_time:
-                rem_notice = max(1, int(ev.trigger_time - self.elapsed_time + 0.9))
+            if notice_start <= self.scenario_time < ev.trigger_time:
+                rem_notice = max(1, int(ev.trigger_time - self.scenario_time + 0.9))
                 if not ev.noticed:
                     ev.noticed = True
                     self.notice_sound_trigger = True
@@ -109,8 +112,8 @@ class EventManager:
                 current_color = 10 # 黄色
 
             # 2. イベント発生中（trigger_time 〜 trigger_time + duration の全期間）
-            elif ev.trigger_time <= self.elapsed_time < ev.trigger_time + ev.duration:
-                rem_duration = max(1, int(ev.trigger_time + ev.duration - self.elapsed_time + 0.9))
+            elif ev.trigger_time <= self.scenario_time < ev.trigger_time + ev.duration:
+                rem_duration = max(1, int(ev.trigger_time + ev.duration - self.scenario_time + 0.9))
                 if not ev.started:
                     ev.started = True
                     self.event_sound_trigger = True
@@ -127,7 +130,7 @@ class EventManager:
                 break
 
             # 3. イベント終了判定
-            elif ev.started and not ev.finished and self.elapsed_time >= ev.trigger_time + ev.duration:
+            elif ev.started and not ev.finished and self.scenario_time >= ev.trigger_time + ev.duration:
                 ev.finished = True
                 self.active_banner_msg = f"【終了】「{ev.name}」が終了し、需給が通常状態に復旧しました。"
                 self.banner_timer = 5.0
@@ -147,10 +150,10 @@ class EventManager:
             self.current_load_multiplier = 1.0
             self.current_hydro_multiplier = 1.0
 
-        # 全イベント終了時のループ処理
+        # 全イベント終了時のループ処理（scenario_timeのみリセットし、elapsed_timeは進み続ける）
         if self.loop_scenario and self.events:
             last_end = max(e.trigger_time + e.duration for e in self.events)
-            if self.elapsed_time > last_end + 10.0:
-                self.elapsed_time = 0.0
+            if self.scenario_time > last_end + 10.0:
+                self.scenario_time = 0.0
                 for ev in self.events:
                     ev.reset()

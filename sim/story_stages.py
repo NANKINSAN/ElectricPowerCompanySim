@@ -112,7 +112,7 @@ STORY_STAGES = [
         "synopsis": (
             "新緑町に新興住宅地や商業エリアが開発され、消費電力が大きく増加し始めました！\n"
             "初期3基（火力1・水力1・揚水1）だけでは電力供給が限界を迎えます。\n"
-            "売電資金を使い、画面右下のボタンから【火力】または【水力】発電所を新たに1基以上建設\n"
+            "売電資金を使い、[＋発電所新設] ボタン（Bキー）の新設メニューから発電所を新たに1基以上建設\n"
             "（合計4基以上を保有）し、増加する需要を支えてください！"
         ),
         "events_desc": (
@@ -298,7 +298,7 @@ def check_stage_clear(stage: dict, plants: list, money: float, elapsed_time: flo
 
         if "thermal" in target_plants:
             req_th = target_plants["thermal"]
-            cur_th = sum(1 for p in plants if getattr(p, "plant_type", "") == "thermal")
+            cur_th = sum(1 for p in plants if getattr(p, "plant_type", "") in ("thermal", "advanced_thermal"))
             if cur_th < req_th:
                 conditions_met = False
             progress_parts.append(f"火力所: {cur_th}/{req_th}基")

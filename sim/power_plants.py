@@ -1,6 +1,6 @@
 """
 発電所モデル
-火力発電所、流れ込み式水力発電所、揚水発電所
+火力発電所、改良火力発電所（ガバナフリー対応）、流れ込み式水力発電所、揚水発電所
 """
 
 class BasePlant:
@@ -142,6 +142,101 @@ class ThermalPlant(BasePlant):
             self.pending_target_mw = self.current_output_mw
         # 燃料費 (円/MWh)
         self.fuel_cost_per_mwh = 8000.0
+
+
+class AdvancedThermalPlant(BasePlant):
+    """
+    改良火力発電所：
+    超臨界圧／コンバインドサイクルによる大出力・高速追従に加え、
+    高性能調速機による「ガバナフリー（GF）運転」を搭載。
+    系統周波数偏差に応じて出力を自動増減させ、需給バランスと周波数を自律安定化する。
+    """
+    def __init__(self, plant_id: str, name: str, x: int, y: int, config: dict, construction_time_sec: float = 0.0, command_cooldown_sec: float = 1.5):
+        super().__init__(
+            plant_id=plant_id,
+            name=name,
+            plant_type="advanced_thermal",
+            x=x,
+            y=y,
+            max_output_mw=config.get("max_output_mw", 120.0),
+            min_output_mw=config.get("min_output_mw", 20.0),
+            ramp_rate=config.get("ramp_rate_mw_per_sec", 6.0),
+            construction_time_sec=construction_time_sec,
+            command_cooldown_sec=command_cooldown_sec
+        )
+        # ガバナフリー（GF）運転パラメータ
+        self.governor_free = True               # ガバナフリー有効
+        self.pending_governor_free = True       # 仮設定
+        self.gf_droop = config.get("gf_droop_mw_per_hz", 40.0)  # 周波数偏差1Hzあたりの出力調整感度 (MW/Hz)
+        self.gf_delta_mw = 0.0                  # ガバナフリー補正量 (MW)
+
+        # 基準設定出力 (GFの動作中心点)
+        mid = (self.max_output_mw + self.min_output_mw) / 2.0
+        self.base_output_mw = mid
+        self.pending_base_output_mw = mid
+
+        if not self.is_under_construction:
+            self.current_output_mw = mid
+            self.target_output_mw = mid
+            self.pending_target_mw = mid
+
+        # 高効率のため燃料費は通常火力より低め
+        self.fuel_cost_per_mwh = 7200.0
+
+    def set_target(self, target_mw: float) -> bool:
+        """基準出力目標値を仮設定"""
+        clamped = max(self.min_output_mw, min(self.max_output_mw, target_mw))
+        self.pending_base_output_mw = clamped
+        self.pending_target_mw = clamped
+        return True
+
+    def toggle_pending_governor_free(self) -> bool:
+        """ガバナフリー運転の仮設定を反転"""
+        self.pending_governor_free = not self.pending_governor_free
+        return self.pending_governor_free
+
+    def commit_command(self) -> bool:
+        """指令確定：基準目標値およびガバナフリー設定を適用"""
+        if not self.can_operate():
+            return False
+        self.base_output_mw = self.pending_base_output_mw
+        self.governor_free = self.pending_governor_free
+        self.target_output_mw = self.base_output_mw
+        self.trigger_cooldown()
+        return True
+
+    def update_gf(self, freq: float, rated_freq: float = 60.0):
+        """周波数偏差に応じたガバナフリー自律出力補正"""
+        if self.is_under_construction or not self.is_active or not self.connected:
+            self.gf_delta_mw = 0.0
+            return
+
+        if self.governor_free:
+            df = freq - rated_freq
+            # 不感帯（チャタリング防止用: ±0.015Hz）
+            if abs(df) < 0.015:
+                delta_p = 0.0
+            else:
+                # 周波数が低い(df < 0)と出力を増加(delta_p > 0)、高いと出力を抑制
+                delta_p = -self.gf_droop * df
+
+            # 最小〜最大出力リミット
+            desired = self.base_output_mw + delta_p
+            clamped = max(self.min_output_mw, min(self.max_output_mw, desired))
+            self.gf_delta_mw = clamped - self.base_output_mw
+            self.target_output_mw = clamped
+        else:
+            self.gf_delta_mw = 0.0
+            self.target_output_mw = self.base_output_mw
+
+    def update(self, dt: float, weather_multiplier: float = 1.0):
+        super().update(dt, weather_multiplier)
+        if getattr(self, "just_completed", False):
+            mid = (self.max_output_mw + self.min_output_mw) / 2.0
+            self.base_output_mw = mid
+            self.pending_base_output_mw = mid
+            self.target_output_mw = mid
+
 
 
 class HydroPlant(BasePlant):

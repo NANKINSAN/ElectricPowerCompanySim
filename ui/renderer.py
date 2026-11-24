@@ -369,6 +369,30 @@ class GameRenderer:
             self.draw_text(x - 8, y + h + 2, f"{p.name}", 7)
             self.draw_text(x - 4, y + h + 13, f"{p.current_output_mw:.0f}MW", 10)
 
+        elif p.plant_type == "advanced_thermal":
+            # 改良火力：ハイテクな青灰・シアン建屋 + 2本煙突 + GFインジケータLED
+            pyxel.rect(x, y + 5, w, h - 5, 5)
+            pyxel.rectb(x, y + 5, w, h - 5, 12)
+            # 2本煙突
+            pyxel.rect(x + 3, y + 1, 3, 5, 6)
+            pyxel.rect(x + 10, y + 1, 3, 5, 6)
+            # 煙
+            if p.get_output_mw() > 5.0 and pyxel.frame_count % 10 < 6:
+                pyxel.pset(x + 4, y - 1, 7)
+                pyxel.pset(x + 11, y - 1, 7)
+            # ガバナフリー（GF）インジケータLED (右上に緑色LED、GF稼働中は点滅)
+            is_gf = getattr(p, "governor_free", False)
+            if is_gf:
+                led_col = 10 if pyxel.frame_count % 16 < 10 else 9
+                pyxel.pset(x + w - 4, y + 8, led_col)
+                pyxel.pset(x + w - 3, y + 8, led_col)
+            else:
+                pyxel.pset(x + w - 4, y + 8, 8)
+
+            self.draw_text(x - 8, y + h + 2, f"{p.name}", 7)
+            gf_tag = " (GF)" if is_gf else ""
+            self.draw_text(x - 4, y + h + 13, f"{p.current_output_mw:.0f}MW{gf_tag}", 11 if is_gf else 10)
+
         elif p.plant_type == "hydro":
             pyxel.rect(x, y + 4, w, h - 4, 1)
             pyxel.rectb(x, y + 4, w, h - 4, 12)
@@ -430,15 +454,16 @@ class GameRenderer:
         panel_y = 268
         pyxel.rect(0, panel_y, 480, 92, 1)
         pyxel.line(0, panel_y, 480, panel_y, 6)
+        pyxel.line(312, panel_y, 312, panel_y + 92, 5)
 
         # 1. 選択中オブジェクトの情報 & コントロール
         if selected_obj is not None:
             self._draw_object_controls(selected_obj, buttons, panel_y, slider)
         else:
             if is_manual_paused:
-                self.draw_text(8, panel_y + 6, "【 ⏸ 全体時間停止中 】 空き地クリック / 右クリックで時間再開", 10)
+                self.draw_text(8, panel_y + 6, "【 ⏸ 全体時間停止中 】 空き地クリックで再開", 10, max_width=300)
             else:
-                self.draw_text(8, panel_y + 6, "【 ▶ 系統運転中 】 設備選択で指令、空き地クリックで時間一時停止", 7)
+                self.draw_text(8, panel_y + 6, "【 ▶ 系統運転中 】 設備選択で指令、空き地で一時停止", 7, max_width=300)
             # 各発電所の現在状況サマリー一覧
             for idx, p in enumerate(plants):
                 col_x = 8 + (idx % 3) * 102
@@ -451,13 +476,23 @@ class GameRenderer:
                     self.draw_text(col_x, row_y, out_str, 10)
 
         # 2. 設備新設（投資）エリア (右側: x=315)
-        self.draw_text(315, panel_y + 6, "【 設備新設・設備投資 】", 10)
-        if "btn_buy_thermal" in buttons:
-            buttons["btn_buy_thermal"].draw()
-        if "btn_buy_hydro" in buttons:
-            buttons["btn_buy_hydro"].draw()
-        if "btn_buy_pumped" in buttons:
-            buttons["btn_buy_pumped"].draw()
+        self.draw_text(318, panel_y + 6, "【 設備新設・設備投資 】", 10)
+        if "btn_open_build" in buttons:
+            buttons["btn_open_build"].draw()
+            n_t = sum(1 for p in plants if p.plant_type == "thermal")
+            n_at = sum(1 for p in plants if p.plant_type == "advanced_thermal")
+            n_h = sum(1 for p in plants if p.plant_type == "hydro")
+            n_p = sum(1 for p in plants if p.plant_type == "pumped_storage")
+            self.draw_text(320, panel_y + 53, f"設備数: 火{n_t} 改{n_at} 水{n_h} 揚{n_p} (計{len(plants)}基)", 7)
+            self.draw_text(320, panel_y + 68, "※[B]キーで新設メニューを開く", 6)
+        elif "btn_buy_thermal" in buttons:
+            # 互換用フォールバック
+            if "btn_buy_thermal" in buttons:
+                buttons["btn_buy_thermal"].draw()
+            if "btn_buy_hydro" in buttons:
+                buttons["btn_buy_hydro"].draw()
+            if "btn_buy_pumped" in buttons:
+                buttons["btn_buy_pumped"].draw()
 
         # 3. 電線ホバー時の潮流ツールチップ
         self._draw_line_tooltip(lines, mx, my)
@@ -506,11 +541,24 @@ class GameRenderer:
             if cd_w > 0:
                 pyxel.rect(206, panel_y + 8, cd_w, 2, 9)
 
-        # 火力発電所の場合
-        if hasattr(obj, "plant_type") and obj.plant_type == "thermal":
+        # 火力発電所または改良火力発電所の場合
+        if hasattr(obj, "plant_type") and obj.plant_type in ("thermal", "advanced_thermal"):
+            is_adv = (obj.plant_type == "advanced_thermal")
             ramp = getattr(obj, "ramp_rate", getattr(obj, "ramp_rate_mw_per_sec", 8.0))
-            info_str = f"現在出力: {obj.current_output_mw:.1f}MW / 目標: {obj.target_output_mw:.0f}MW (定格: {obj.max_output_mw:.0f}MW, 追従: ±{ramp:.1f}MW/s)"
-            self.draw_text(8, panel_y + 19, info_str, 7)
+
+            if is_adv:
+                gf_active = getattr(obj, "governor_free", False)
+                gf_delta = getattr(obj, "gf_delta_mw", 0.0)
+                gf_sign = f"+{gf_delta:.1f}" if gf_delta >= 0 else f"{gf_delta:.1f}"
+                gf_desc = f"[GF調速 {gf_sign}MW]" if gf_active else "[GF手動固定]"
+                gf_col = 10 if (gf_active and abs(gf_delta) > 0.1) else (11 if gf_active else 5)
+                base_val = getattr(obj, "base_output_mw", obj.target_output_mw)
+                info_str = f"出力: {obj.current_output_mw:.0f}MW / 基準: {base_val:.0f}MW (定格:{obj.max_output_mw:.0f}MW)"
+                self.draw_text(8, panel_y + 19, info_str, 7)
+                self.draw_text(212, panel_y + 19, gf_desc, gf_col)
+            else:
+                info_str = f"現在出力: {obj.current_output_mw:.0f}MW / 目標: {obj.target_output_mw:.0f}MW (定格: {obj.max_output_mw:.0f}MW, ±{ramp:.1f}MW/s)"
+                self.draw_text(8, panel_y + 19, info_str, 7)
 
             # スライダーの描画
             if slider is not None:
@@ -521,6 +569,15 @@ class GameRenderer:
                 # 目盛りラベル
                 self.draw_text(slider.x, panel_y + 47, f"MIN({obj.min_output_mw:.0f})", 6)
                 self.draw_text(slider.x + slider.w - 36, panel_y + 47, f"MAX({obj.max_output_mw:.0f})", 6)
+
+            # 改良火力用のガバナフリートグルボタン
+            if is_adv and "btn_gf_toggle" in buttons:
+                btn_gf = buttons["btn_gf_toggle"]
+                btn_gf.enabled = can_op
+                pend_gf = getattr(obj, "pending_governor_free", getattr(obj, "governor_free", True))
+                btn_gf.text = "GF運転: ON (G)" if pend_gf else "GF運転: OFF (G)"
+                btn_gf.col_bg = 3 if pend_gf else 0
+                btn_gf.draw()
 
             # 指令送信ボタン (Enter)
             if "btn_commit" in buttons:
@@ -1041,4 +1098,129 @@ class GameRenderer:
             self.draw_text(btn_x + 20, btn_y + 7, "[ 次のステージへ (Enter / Click) ]", 11 if btn_hover else 10)
 
         self.draw_text(gx + 125, gy + gh - 16, "[ ESC キー : タイトルへ ]", 6)
+
+    def draw_plant_build_modal(self, plant_configs: dict, current_money: float, cost_multiplier: float, time_multiplier: float, plants: list, mx: int, my: int):
+        """発電設備新設メニュー（モーダルダイアログ）を描画"""
+        # 1. 画面全体の暗幕オーバーレイ
+        for y_line in range(0, 360, 2):
+            pyxel.line(0, y_line, 480, y_line, 0)
+
+        # 2. ウィンドウ枠 (x=20, y=14, w=440, h=332)
+        wx, wy, ww, wh = 20, 14, 440, 332
+        pyxel.rect(wx, wy, ww, wh, 1)
+        pyxel.rectb(wx, wy, ww, wh, 7)
+
+        # ヘッダー帯
+        pyxel.rect(wx, wy, ww, 22, 0)
+        pyxel.rectb(wx, wy, ww, 22, 6)
+        self.draw_text(wx + 8, wy + 6, "【 発電設備 新設・投資メニュー 】", 10)
+        self.draw_text(wx + 215, wy + 6, f"所持資金: ¥{int(current_money):,}", 11)
+
+        # [閉じる X] ボタン
+        close_hover = (wx + ww - 65 <= mx <= wx + ww - 5 and wy + 4 <= my <= wy + 18)
+        pyxel.rect(wx + ww - 65, wy + 4, 60, 14, 8 if close_hover else 1)
+        pyxel.rectb(wx + ww - 65, wy + 4, 60, 14, 7)
+        self.draw_text(wx + ww - 61, wy + 6, "[閉じる X]", 7)
+
+        # 3. 設備一覧（4項目）
+        order = [
+            ("thermal", "1", "火力発電所", 4),
+            ("advanced_thermal", "2", "改良火力発電所 ★GF調速", 12),
+            ("hydro", "3", "流れ込み式水力発電所", 1),
+            ("pumped_storage", "4", "揚水発電所", 2)
+        ]
+
+        card_x = wx + 8
+        card_w = ww - 16
+        card_h = 67
+
+        for idx, (p_type, shortcut, title, theme_col) in enumerate(order):
+            cfg = plant_configs.get(p_type, {})
+            cost = int(cfg.get("build_cost", 10000000) * cost_multiplier)
+            c_time = float(cfg.get("construction_time_sec", 30.0) * time_multiplier)
+            cur_count = sum(1 for p in plants if getattr(p, "plant_type", "") == p_type)
+            can_afford = (current_money >= cost)
+
+            cy = wy + 25 + idx * 70
+
+            # カード背景・枠線
+            pyxel.rect(card_x, cy, card_w, card_h, 0)
+            pyxel.rectb(card_x, cy, card_w, card_h, 7 if can_afford else 5)
+            # 左端カラーバー
+            pyxel.rect(card_x, cy, 4, card_h, theme_col)
+
+            # アイコンミニチュア (card_x + 8, cy + 10)
+            ix, iy = card_x + 8, cy + 12
+            if p_type == "thermal":
+                pyxel.rect(ix, iy + 6, 18, 14, 4)
+                pyxel.rect(ix + 3, iy, 4, 6, 9)
+                pyxel.circ(ix + 5, iy - 2, 2, 7)
+            elif p_type == "advanced_thermal":
+                pyxel.rect(ix, iy + 5, 18, 15, 5)
+                pyxel.rectb(ix, iy + 5, 18, 15, 12)
+                pyxel.rect(ix + 3, iy + 1, 3, 4, 6)
+                pyxel.rect(ix + 9, iy + 1, 3, 4, 6)
+                pyxel.pset(ix + 14, iy + 7, 10)
+            elif p_type == "hydro":
+                pyxel.rect(ix, iy + 4, 18, 16, 1)
+                pyxel.rectb(ix, iy + 4, 18, 16, 12)
+                pyxel.line(ix + 2, iy + 8, ix + 16, iy + 8, 7)
+            elif p_type == "pumped_storage":
+                pyxel.rect(ix, iy + 2, 18, 18, 2)
+                pyxel.rectb(ix, iy + 2, 18, 18, 10)
+                pyxel.rect(ix + 2, iy + 10, 4, 8, 12)
+                pyxel.text(ix + 8, iy + 6, "PS", 10)
+
+            # テキスト情報
+            tx = card_x + 32
+            # 1行目: タイトルと保有数
+            t_col = 10 if p_type == "advanced_thermal" else (11 if p_type == "hydro" else 7)
+            self.draw_text(tx, cy + 4, f"[{shortcut}] {title} (保有: {cur_count}基)", t_col)
+
+            # 2行目: スペック
+            if p_type == "thermal":
+                spec = f"定格:{cfg.get('max_output_mw',80):.0f}MW (10~80MW) / 追従:±{cfg.get('ramp_rate_mw_per_sec',3.5):.1f}MW/s"
+            elif p_type == "advanced_thermal":
+                spec = f"定格:{cfg.get('max_output_mw',120):.0f}MW (20~120MW) / 追従:±{cfg.get('ramp_rate_mw_per_sec',6.0):.1f}MW/s"
+            elif p_type == "hydro":
+                spec = f"定格:{cfg.get('max_output_mw',40):.0f}MW / ベースロード安定出力・燃料費0円"
+            elif p_type == "pumped_storage":
+                spec = f"発電:{cfg.get('max_output_mw',70):.0f}MW / 揚水:{cfg.get('pump_load_mw',75):.0f}MW (蓄電:{cfg.get('max_storage_mwh',350):.0f}MWh)"
+            else:
+                spec = ""
+            self.draw_text(tx, cy + 17, spec, 11)
+
+            # 3行目: コスト・工期
+            c_col = 10 if can_afford else 8
+            cost_str = f"建設費: ¥{cost:,} / 工期: 約{int(c_time)}秒"
+            self.draw_text(tx, cy + 30, cost_str, c_col)
+
+            # 4行目: 特徴説明文
+            desc = cfg.get("desc", "")
+            self.draw_text(tx, cy + 43, desc, 6, max_width=290)
+
+            # 右端の建設ボタン
+            bx = card_x + card_w - 96
+            by = cy + 14
+            bw, bh = 90, 38
+            btn_hover = (bx <= mx <= bx + bw and by <= my <= by + bh)
+
+            if can_afford:
+                b_bg = 3 if btn_hover else 1
+                b_border = 11 if btn_hover else 10
+                t_btn_col = 11 if btn_hover else 10
+                pyxel.rect(bx, by, bw, bh, b_bg)
+                pyxel.rectb(bx, by, bw, bh, b_border)
+                self.draw_text(bx + 16, by + 8, "建設着工", t_btn_col)
+                self.draw_text(bx + 14, by + 22, f"(キー: {shortcut})", 7)
+            else:
+                pyxel.rect(bx, by, bw, bh, 0)
+                pyxel.rectb(bx, by, bw, bh, 5)
+                self.draw_text(bx + 18, by + 8, "資金不足", 5)
+                diff_m = cost - int(current_money)
+                self.draw_text(bx + 8, by + 22, f"-¥{diff_m//10000}万", 8)
+
+        # 4. フッター案内文
+        self.draw_text(wx + 45, wy + wh - 17, "※数字キー [1]〜[4] または [着工] で建設開始 / [ESC] または [B] で閉じる", 10)
+
 

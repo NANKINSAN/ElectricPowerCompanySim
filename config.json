@@ -47,6 +47,16 @@
       "min_output_mw": 10.0,
       "ramp_rate_mw_per_sec": 3.5
     },
+    "advanced_thermal": {
+      "name": "改良火力発電所",
+      "desc": "ガバナフリー(GF)自動調速運転で周波数偏差を自律補正。高速追従・大出力。",
+      "build_cost": 15000000,
+      "construction_time_sec": 40.0,
+      "max_output_mw": 120.0,
+      "min_output_mw": 20.0,
+      "ramp_rate_mw_per_sec": 6.0,
+      "gf_droop_mw_per_hz": 40.0
+    },
     "hydro": {
       "name": "流れ込み式水力発電所",
       "desc": "ベースロード。出力は川の流量で決まる。低運用コスト。",

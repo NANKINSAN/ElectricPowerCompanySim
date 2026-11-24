@@ -7,7 +7,7 @@ import json
 import os
 
 from sim.frequency import FrequencySystem
-from sim.power_plants import ThermalPlant, HydroPlant, PumpedStoragePlant
+from sim.power_plants import ThermalPlant, AdvancedThermalPlant, HydroPlant, PumpedStoragePlant
 from sim.consumers import TownManager
 from sim.grid import GridNetwork
 from sim.economy import EconomySystem
@@ -61,6 +61,9 @@ class PowerGridApp:
         self.substation_tab = 0  # 0: 供給側(発電所), 1: 需要側(町・工場)
         self.substation_scroll_y = 0
 
+        # 発電設備新設モーダルダイアログ管理
+        self.is_showing_build_modal = False
+
         # 5. UI ボタン・スライダー生成
         self.buttons = {}
         self.slider = None
@@ -106,12 +109,15 @@ class PowerGridApp:
         self.buttons["btn_close"] = Button(252, panel_y + 4, 55, 14, "閉じる (右)", 1, 7, 8, font=f)
 
         # 指令送信確定ボタン (Enter)
-        self.buttons["btn_commit"] = Button(215, panel_y + 32, 92, 22, "指令送信 (Enter)", 3, 7, 11, font=f, shortcut_key=(pyxel.KEY_RETURN, pyxel.KEY_KP_ENTER))
+        self.buttons["btn_commit"] = Button(228, panel_y + 32, 79, 22, "指令送信 (Enter)", 3, 7, 11, font=f, shortcut_key=(pyxel.KEY_RETURN, pyxel.KEY_KP_ENTER))
 
-        # 出力制御スライダー (火力発電所用)
-        self.slider = Slider(8, panel_y + 34, 110, 10, min_val=10.0, max_val=80.0, initial_val=45.0, font=f)
+        # 出力制御スライダー (火力・改良火力発電所用)
+        self.slider = Slider(8, panel_y + 34, 96, 10, min_val=10.0, max_val=80.0, initial_val=45.0, font=f)
 
-        # 火力用操作ボタン (panel_y + 60) - 左手操作キー (Q, S, W, E, A, D)
+        # 改良火力用 ガバナフリー（GF）運転切替ボタン (G)
+        self.buttons["btn_gf_toggle"] = Button(150, panel_y + 32, 74, 22, "GF運転: ON (G)", 3, 7, 10, font=f, shortcut_key=pyxel.KEY_G)
+
+        # 火力・改良火力用操作ボタン (panel_y + 60) - 左手操作キー (Q, S, W, E, A, D)
         self.buttons["btn_dec10"] = Button(8, panel_y + 60, 42, 16, "-10 (Q)", 1, 7, 9, font=f, shortcut_key=pyxel.KEY_Q)
         self.buttons["btn_dec1"]  = Button(53, panel_y + 60, 38, 16, "-1 (S)", 1, 7, 9, font=f, shortcut_key=pyxel.KEY_S)
         self.buttons["btn_inc1"]  = Button(94, panel_y + 60, 38, 16, "+1 (W)", 1, 7, 9, font=f, shortcut_key=pyxel.KEY_W)
@@ -127,10 +133,8 @@ class PowerGridApp:
         # 変電所用送受電切替ボタン (panel_y + 38) - 左手操作キー 送受電切替(Space / F)
         self.buttons["btn_toggle_power"] = Button(8, panel_y + 38, 130, 18, "送受電停止 (Space)", 1, 7, 9, font=f, shortcut_key=(pyxel.KEY_SPACE, pyxel.KEY_F))
 
-        # 設備新設（購入）ボタン (右側エリア: x=315) - 左手上段数字キー 1, 2, 3 (または Z, X, C)
-        self.buttons["btn_buy_thermal"] = Button(315, panel_y + 24, 155, 18, "+火力 (1)", 4, 7, 9, font=f, shortcut_key=(pyxel.KEY_1, pyxel.KEY_Z))
-        self.buttons["btn_buy_hydro"]   = Button(315, panel_y + 45, 155, 18, "+水力 (2)", 1, 7, 11, font=f, shortcut_key=(pyxel.KEY_2, pyxel.KEY_X))
-        self.buttons["btn_buy_pumped"]  = Button(315, panel_y + 66, 155, 18, "+揚水 (3)", 2, 7, 10, font=f, shortcut_key=(pyxel.KEY_3, pyxel.KEY_C))
+        # 設備新設ダイアログを開くボタン (右側エリア: x=320, panel_y+24) - ショートカットキー B
+        self.buttons["btn_open_build"] = Button(320, panel_y + 24, 145, 24, "＋発電所新設 (B)", 3, 7, 11, font=f, shortcut_key=pyxel.KEY_B)
 
         # タイトル画面用 難易度選択ボタン
         self.buttons["title_easy"]   = Button(150, 140, 180, 20, "初級 (ストーリー全5話) (1)", 1, 7, 11, font=f, shortcut_key=pyxel.KEY_1)
@@ -138,40 +142,27 @@ class PowerGridApp:
         self.buttons["title_hard"]   = Button(150, 192, 180, 20, "上級 (フリーモード) (3)", 1, 7, 8, font=f, shortcut_key=pyxel.KEY_3)
 
     def _update_buy_buttons_text(self):
-        diff_info = self.config.get("difficulties", {}).get(self.difficulty_key, {})
-        cost_mult = diff_info.get("cost_multiplier", 1.0)
-        time_mult = diff_info.get("construction_time_multiplier", 1.0)
-
-        p_configs = self.config.get("plant_types", {})
-        t_cost = int(p_configs.get("thermal", {}).get("build_cost", 8000000) * cost_mult)
-        h_cost = int(p_configs.get("hydro", {}).get("build_cost", 6000000) * cost_mult)
-        p_cost = int(p_configs.get("pumped_storage", {}).get("build_cost", 12000000) * cost_mult)
-
-        t_time = int(p_configs.get("thermal", {}).get("construction_time_sec", 30.0) * time_mult)
-        h_time = int(p_configs.get("hydro", {}).get("construction_time_sec", 25.0) * time_mult)
-        p_time = int(p_configs.get("pumped_storage", {}).get("construction_time_sec", 40.0) * time_mult)
-
-        self.buttons["btn_buy_thermal"].text = f"+火力 {t_cost//10000}万/{t_time}s (1)"
-        self.buttons["btn_buy_hydro"].text   = f"+水力 {h_cost//10000}万/{h_time}s (2)"
-        self.buttons["btn_buy_pumped"].text  = f"+揚水 {p_cost//10000}万/{p_time}s (3)"
+        pass
 
     def _get_plant_position(self, plant_type: str, index: int) -> tuple[int, int]:
         """
         発電所オブジェクトが重ならないように整然と配置する
         列: x = 20, 75, 130 (横に3基)
-        行: 火力 y=52, 水力 y=122, 揚水 y=192 (各行間 70px)
+        行: 火力 y=54, 改良火力 y=104, 水力 y=154, 揚水 y=204
         """
         col = index % 3
         row = index // 3
         x = 20 + col * 55
         if plant_type == "thermal":
-            y = 58 + row * 34
+            y = 54 + row * 32
+        elif plant_type == "advanced_thermal":
+            y = 104 + row * 32
         elif plant_type == "hydro":
-            y = 126 + row * 34
+            y = 154 + row * 32
         elif plant_type == "pumped_storage":
-            y = 194 + row * 34
+            y = 204 + row * 32
         else:
-            y = 58 + row * 34
+            y = 54 + row * 32
         return (x, y)
 
     def start_game(self, diff_key: str):
@@ -616,11 +607,111 @@ class PowerGridApp:
             msg = f"【開閉盤操作】受給開閉器を操作（系統接続: {conn_changes}件, 系統遮断: {disc_changes}件）"
             self.add_message_log(self.event_mgr.elapsed_time, "SUBSTATION", msg, 10)
 
+    def _update_plant_build_modal(self, mx: int, my: int) -> bool:
+        """発電設備新設モーダルダイアログ表示中の入力処理"""
+        if not self.is_showing_build_modal:
+            return False
+
+        wx, wy, ww, wh = 20, 14, 440, 332
+        close_clicked = False
+
+        # 閉じる判定 (右クリック, ESC, B, [閉じる X] ボタン, 枠外クリック)
+        if pyxel.btnp(pyxel.MOUSE_BUTTON_LEFT):
+            if (wx + ww - 65 <= mx <= wx + ww - 5) and (wy + 4 <= my <= wy + 18):
+                close_clicked = True
+            elif not (wx <= mx <= wx + ww and wy <= my <= wy + wh):
+                close_clicked = True
+        elif pyxel.btnp(pyxel.MOUSE_BUTTON_RIGHT) or pyxel.btnp(pyxel.KEY_ESCAPE) or pyxel.btnp(pyxel.KEY_B):
+            close_clicked = True
+
+        if close_clicked:
+            self.is_showing_build_modal = False
+            self.sound.play_click()
+            return True
+
+        order = ["thermal", "advanced_thermal", "hydro", "pumped_storage"]
+
+        # 数字キー 1〜4 での直接着工
+        key_map = {
+            pyxel.KEY_1: "thermal",
+            pyxel.KEY_KP_1: "thermal",
+            pyxel.KEY_2: "advanced_thermal",
+            pyxel.KEY_KP_2: "advanced_thermal",
+            pyxel.KEY_3: "hydro",
+            pyxel.KEY_KP_3: "hydro",
+            pyxel.KEY_4: "pumped_storage",
+            pyxel.KEY_KP_4: "pumped_storage",
+        }
+        for k, p_type in key_map.items():
+            if pyxel.btnp(k):
+                if self._build_plant(p_type):
+                    self.is_showing_build_modal = False
+                return True
+
+        # マウスクリックでの建設着工ボタン判定
+        if pyxel.btnp(pyxel.MOUSE_BUTTON_LEFT):
+            card_x = wx + 8
+            card_w = ww - 16
+            for idx, p_type in enumerate(order):
+                cy = wy + 25 + idx * 70
+                bx = card_x + card_w - 96
+                by = cy + 14
+                bw, bh = 90, 38
+                if (bx <= mx <= bx + bw) and (by <= my <= by + bh):
+                    if self._build_plant(p_type):
+                        self.is_showing_build_modal = False
+                    return True
+
+        return True
+
+    def _build_plant(self, plant_type: str) -> bool:
+        """発電設備を新設・着工する共通処理"""
+        diff_info = self.config.get("difficulties", {}).get(self.difficulty_key, {})
+        cost_mult = diff_info.get("cost_multiplier", 1.0)
+        time_mult = diff_info.get("construction_time_multiplier", 1.0)
+        cooldown_sec = diff_info.get("command_cooldown_sec", 1.5)
+        p_configs = self.config.get("plant_types", {})
+        cfg = p_configs.get(plant_type, {})
+        if not cfg:
+            return False
+
+        cost = int(cfg.get("build_cost", 10000000) * cost_mult)
+        c_time = float(cfg.get("construction_time_sec", 30.0) * time_mult)
+
+        if not self.economy.spend_money(cost):
+            self.sound.play_alarm()
+            return False
+
+        n = sum(1 for p in self.plants if p.plant_type == plant_type)
+        pos = self._get_plant_position(plant_type, n)
+
+        if plant_type == "thermal":
+            new_p = ThermalPlant(f"thermal_{n+1}", f"火力{n+1}号機", pos[0], pos[1], cfg, construction_time_sec=c_time, command_cooldown_sec=cooldown_sec)
+        elif plant_type == "advanced_thermal":
+            new_p = AdvancedThermalPlant(f"adv_thermal_{n+1}", f"改良火力{n+1}号", pos[0], pos[1], cfg, construction_time_sec=c_time, command_cooldown_sec=cooldown_sec)
+        elif plant_type == "hydro":
+            new_p = HydroPlant(f"hydro_{n+1}", f"水力{n+1}号機", pos[0], pos[1], cfg, construction_time_sec=c_time, command_cooldown_sec=cooldown_sec)
+        elif plant_type == "pumped_storage":
+            new_p = PumpedStoragePlant(f"pumped_{n+1}", f"揚水{n+1}号機", pos[0], pos[1], cfg, construction_time_sec=c_time, command_cooldown_sec=cooldown_sec)
+        else:
+            return False
+
+        self.plants.append(new_p)
+        self.grid.build_network(self.plants, self.town_mgr.consumers)
+        self.sound.play_build()
+        self.selected_obj = new_p
+        self.construction_msg = f"【着工】{new_p.name} の建設工事を開始！（完成まで約{int(c_time)}秒）"
+        self.construction_msg_timer = 5.0
+        self.add_message_log(self.event_mgr.elapsed_time, "BUILD_START", self.construction_msg, 10)
+        return True
+
     def _update_playing(self, mx: int, my: int):
         # 0. モーダル表示中のインタラクション (時間は停止)
         if self._update_message_log_modal(mx, my):
             return
         if self._update_substation_modal(mx, my):
+            return
+        if self._update_plant_build_modal(mx, my):
             return
 
         # 1行メッセージ表示領域（y: 42〜55）または L キーで履歴ログ画面へ遷移
@@ -638,8 +729,8 @@ class PowerGridApp:
             self.is_manual_paused = False
             return
 
-        # オブジェクト選択中、手動ポーズ中、ログ閲覧中、開閉盤閲覧中は時間を停止する
-        is_paused = (self.selected_obj is not None) or self.is_manual_paused or self.is_showing_log or self.is_showing_substation_modal
+        # オブジェクト選択中、手動ポーズ中、ログ閲覧中、開閉盤閲覧中、新設メニュー閲覧中は時間を停止する
+        is_paused = (self.selected_obj is not None) or self.is_manual_paused or self.is_showing_log or self.is_showing_substation_modal or self.is_showing_build_modal
         dt = 0.0 if is_paused else (1.0 / 30.0)
 
         # 建設メッセージタイマーの減算 (時間が進んでいる時のみ)
@@ -683,6 +774,8 @@ class PowerGridApp:
         rebuild_needed = False
         for p in self.plants:
             if dt > 0.0:
+                if hasattr(p, "update_gf"):
+                    p.update_gf(self.freq_sys.freq, self.freq_sys.rated_freq)
                 p.update(dt, self.event_mgr.current_hydro_multiplier)
             if getattr(p, "just_completed", False):
                 self.sound.play_build()
@@ -782,9 +875,10 @@ class PowerGridApp:
                 self.selected_obj = all_objs[next_idx]
                 self.is_manual_paused = False
                 self.sound.play_click()
-                if hasattr(self.selected_obj, "plant_type") and self.selected_obj.plant_type == "thermal" and self.slider:
+                if hasattr(self.selected_obj, "plant_type") and self.selected_obj.plant_type in ("thermal", "advanced_thermal") and self.slider:
                     self.slider.set_bounds(self.selected_obj.min_output_mw, self.selected_obj.max_output_mw)
-                    self.slider.set_value(getattr(self.selected_obj, "pending_target_mw", self.selected_obj.target_output_mw))
+                    target_val = getattr(self.selected_obj, "pending_base_output_mw", getattr(self.selected_obj, "pending_target_mw", self.selected_obj.target_output_mw))
+                    self.slider.set_value(target_val)
 
         # オブジェクトクリック選択 / 空き地クリックでの時間停止
         if pyxel.btnp(pyxel.MOUSE_BUTTON_LEFT):
@@ -796,9 +890,10 @@ class PowerGridApp:
                     self.selected_obj = obj
                     self.is_manual_paused = False
                     self.sound.play_click()
-                    if hasattr(obj, "plant_type") and obj.plant_type == "thermal" and self.slider:
+                    if hasattr(obj, "plant_type") and obj.plant_type in ("thermal", "advanced_thermal") and self.slider:
                         self.slider.set_bounds(obj.min_output_mw, obj.max_output_mw)
-                        self.slider.set_value(getattr(obj, "pending_target_mw", obj.target_output_mw))
+                        target_val = getattr(obj, "pending_base_output_mw", getattr(obj, "pending_target_mw", obj.target_output_mw))
+                        self.slider.set_value(target_val)
                 else:
                     # 何もないところ（空き地）をクリック: 時間停止（ポーズ）
                     if self.selected_obj is not None:
@@ -828,8 +923,8 @@ class PowerGridApp:
             self.sound.play_click()
             return
 
-        # スライダー更新（火力発電所選択中かつ建設中でない場合）
-        if self.selected_obj and hasattr(self.selected_obj, "plant_type") and self.selected_obj.plant_type == "thermal":
+        # スライダー更新（火力・改良火力発電所選択中かつ建設中でない場合）
+        if self.selected_obj and hasattr(self.selected_obj, "plant_type") and self.selected_obj.plant_type in ("thermal", "advanced_thermal"):
             p = self.selected_obj
             if not getattr(p, "is_under_construction", False) and self.slider:
                 self.slider.set_bounds(p.min_output_mw, p.max_output_mw)
@@ -837,7 +932,8 @@ class PowerGridApp:
                     if self.slider.update(mx, my):
                         p.set_target(self.slider.value)
                 elif not self.slider.is_dragging:
-                    self.slider.set_value(getattr(p, "pending_target_mw", p.target_output_mw))
+                    target_val = getattr(p, "pending_base_output_mw", getattr(p, "pending_target_mw", p.target_output_mw))
+                    self.slider.set_value(target_val)
 
         # ボタン・キー入力処理
         self._handle_button_and_key_inputs(mx, my)
@@ -872,10 +968,10 @@ class PowerGridApp:
             # 各設備別の入力受付
             if getattr(obj, "is_under_construction", False):
                 pass
-            elif hasattr(obj, "plant_type") and obj.plant_type == "thermal":
+            elif hasattr(obj, "plant_type") and obj.plant_type in ("thermal", "advanced_thermal"):
                 p = obj
                 is_shift = pyxel.btn(pyxel.KEY_SHIFT) or pyxel.btn(pyxel.KEY_CTRL)
-                cur_val = getattr(p, "pending_target_mw", p.target_output_mw)
+                cur_val = getattr(p, "pending_base_output_mw", getattr(p, "pending_target_mw", p.target_output_mw))
 
                 if self.buttons["btn_dec10"].is_pressed() or (pyxel.btnp(pyxel.KEY_S) and is_shift):
                     p.set_target(cur_val - 10.0)
@@ -896,8 +992,15 @@ class PowerGridApp:
                     p.set_target(p.max_output_mw)
                     self.sound.play_click()
 
+                # 改良火力専用: ガバナフリー（GF）運転切替 (Gキー / ボタン)
+                if obj.plant_type == "advanced_thermal":
+                    if self.buttons["btn_gf_toggle"].is_pressed() or pyxel.btnp(pyxel.KEY_G):
+                        p.toggle_pending_governor_free()
+                        self.sound.play_click()
+
                 if self.slider and not self.slider.is_dragging:
-                    self.slider.set_value(p.pending_target_mw)
+                    target_val = getattr(p, "pending_base_output_mw", getattr(p, "pending_target_mw", p.target_output_mw))
+                    self.slider.set_value(target_val)
 
             elif hasattr(obj, "plant_type") and obj.plant_type == "pumped_storage":
                 p = obj
@@ -926,60 +1029,14 @@ class PowerGridApp:
                     self.sound.play_click()
 
             elif hasattr(obj, "consumer_type"):
-                # 需要家単位での送電停止切替は不可（変電所で一括制御）
                 pass
 
-        # 2. 設備新設（投資） - 左手数字キー 1, 2, 3
-        diff_info = self.config.get("difficulties", {}).get(self.difficulty_key, {})
-        cost_mult = diff_info.get("cost_multiplier", 1.0)
-        time_mult = diff_info.get("construction_time_multiplier", 1.0)
-        cooldown_sec = diff_info.get("command_cooldown_sec", 1.5)
-        p_configs = self.config.get("plant_types", {})
-
-        if self.buttons["btn_buy_thermal"].is_pressed():
-            cost = int(p_configs.get("thermal", {}).get("build_cost", 8000000) * cost_mult)
-            c_time = float(p_configs.get("thermal", {}).get("construction_time_sec", 30.0) * time_mult)
-            if self.economy.spend_money(cost):
-                n = sum(1 for p in self.plants if p.plant_type == "thermal")
-                pos = self._get_plant_position("thermal", n)
-                new_p = ThermalPlant(f"thermal_{n+1}", f"火力{n+1}号機", pos[0], pos[1], p_configs.get("thermal", {}), construction_time_sec=c_time, command_cooldown_sec=cooldown_sec)
-                self.plants.append(new_p)
-                self.grid.build_network(self.plants, self.town_mgr.consumers)
-                self.sound.play_build()
-                self.selected_obj = new_p
-                self.construction_msg = f"【着工】火力{n+1}号機の建設工事を開始！（完成まで約{int(c_time)}秒）"
-                self.construction_msg_timer = 5.0
-                self.add_message_log(self.event_mgr.elapsed_time, "BUILD_START", self.construction_msg, 10)
-
-        elif self.buttons["btn_buy_hydro"].is_pressed():
-            cost = int(p_configs.get("hydro", {}).get("build_cost", 6000000) * cost_mult)
-            c_time = float(p_configs.get("hydro", {}).get("construction_time_sec", 25.0) * time_mult)
-            if self.economy.spend_money(cost):
-                n = sum(1 for p in self.plants if p.plant_type == "hydro")
-                pos = self._get_plant_position("hydro", n)
-                new_p = HydroPlant(f"hydro_{n+1}", f"水力{n+1}号機", pos[0], pos[1], p_configs.get("hydro", {}), construction_time_sec=c_time, command_cooldown_sec=cooldown_sec)
-                self.plants.append(new_p)
-                self.grid.build_network(self.plants, self.town_mgr.consumers)
-                self.sound.play_build()
-                self.selected_obj = new_p
-                self.construction_msg = f"【着工】水力{n+1}号機の建設工事を開始！（完成まで約{int(c_time)}秒）"
-                self.construction_msg_timer = 5.0
-                self.add_message_log(self.event_mgr.elapsed_time, "BUILD_START", self.construction_msg, 10)
-
-        elif self.buttons["btn_buy_pumped"].is_pressed():
-            cost = int(p_configs.get("pumped_storage", {}).get("build_cost", 12000000) * cost_mult)
-            c_time = float(p_configs.get("pumped_storage", {}).get("construction_time_sec", 40.0) * time_mult)
-            if self.economy.spend_money(cost):
-                n = sum(1 for p in self.plants if p.plant_type == "pumped_storage")
-                pos = self._get_plant_position("pumped_storage", n)
-                new_p = PumpedStoragePlant(f"pumped_{n+1}", f"揚水{n+1}号機", pos[0], pos[1], p_configs.get("pumped_storage", {}), construction_time_sec=c_time, command_cooldown_sec=cooldown_sec)
-                self.plants.append(new_p)
-                self.grid.build_network(self.plants, self.town_mgr.consumers)
-                self.sound.play_build()
-                self.selected_obj = new_p
-                self.construction_msg = f"【着工】揚水{n+1}号機の建設工事を開始！（完成まで約{int(c_time)}秒）"
-                self.construction_msg_timer = 5.0
-                self.add_message_log(self.event_mgr.elapsed_time, "BUILD_START", self.construction_msg, 10)
+        # 2. 設備新設メニューを開く（[＋発電所新設] ボタン または B キー）
+        if self.buttons["btn_open_build"].is_pressed() or pyxel.btnp(pyxel.KEY_B):
+            self.is_showing_build_modal = True
+            self.sound.play_click()
+            self.selected_obj = None
+            self.is_manual_paused = False
 
     def _get_object_at(self, mx: int, my: int):
         # 変電所判定 (中心 200, 150, サイズ 20x20)
@@ -1075,7 +1132,7 @@ class PowerGridApp:
                 cur_total_gen = 0.0
                 cur_total_load = 0.0
 
-            is_paused = (self.selected_obj is not None) or self.is_manual_paused or self.is_showing_log
+            is_paused = (self.selected_obj is not None) or self.is_manual_paused or self.is_showing_log or self.is_showing_substation_modal or self.is_showing_build_modal
             sim_state = {
                 "elapsed_time": self.event_mgr.elapsed_time,
                 "money": self.economy.money,
@@ -1141,7 +1198,23 @@ class PowerGridApp:
                     can_commit=can_com
                 )
 
-            # 5. 最前面にメッセージ履歴ログモーダルを描画（表示中のみ。時間が停止した状態で確認可能。ゲームオーバー後も閲覧可能）
+            # 5. 発電設備新設モーダルダイアログを描画（表示中のみ。時間が停止した状態で設備投資可能）
+            if self.is_showing_build_modal:
+                diff_info = self.config.get("difficulties", {}).get(self.difficulty_key, {})
+                c_mult = diff_info.get("cost_multiplier", 1.0)
+                t_mult = diff_info.get("construction_time_multiplier", 1.0)
+                p_configs = self.config.get("plant_types", {})
+                self.renderer.draw_plant_build_modal(
+                    plant_configs=p_configs,
+                    current_money=self.economy.money,
+                    cost_multiplier=c_mult,
+                    time_multiplier=t_mult,
+                    plants=self.plants,
+                    mx=pyxel.mouse_x,
+                    my=pyxel.mouse_y
+                )
+
+            # 6. 最前面にメッセージ履歴ログモーダルを描画（表示中のみ。時間が停止した状態で確認可能。ゲームオーバー後も閲覧可能）
             if self.is_showing_log:
                 self.renderer.draw_message_log_modal(self.message_logs, self.log_scroll_y, pyxel.mouse_x, pyxel.mouse_y)
 
@@ -1163,18 +1236,18 @@ class PowerGridApp:
         self.buttons["title_hard"].draw()
 
         # 操作説明ボックス
-        bx, by, bw, bh = 45, 216, 390, 138
+        bx, by, bw, bh = 40, 214, 400, 140
         pyxel.rect(bx, by, bw, bh, 0)
         pyxel.rectb(bx, by, bw, bh, 5)
-        self.renderer.draw_text(bx + 10, by + 4, "【操作ガイド（司令塔モード）】", 10)
-        self.renderer.draw_text(bx + 10, by + 18, "・時間一時停止: マップの空き地を左クリックで時間停止 ↔ 再開", 11)
-        self.renderer.draw_text(bx + 10, by + 32, "・設備選択: Tabキー / 設備クリック (選択中も時間が一時停止)", 7)
-        self.renderer.draw_text(bx + 10, by + 46, "・指令送信: Enterキー / [指令送信]ボタン (指令後、時間再開&待機時間)", 10)
-        self.renderer.draw_text(bx + 10, by + 60, "・時間再開: 右クリック / Spaceキー でいつでも時間再開", 7)
-        self.renderer.draw_text(bx + 10, by + 74, "・火力出力: W/S (微増減), Q/E (10MW), A(MIN), D(MAX), スライダー", 7)
-        self.renderer.draw_text(bx + 10, by + 88, "・揚水切替: W(発電), S(揚水充電), A(停止) | 変電所: Spaceで系統開閉盤", 7)
-        self.renderer.draw_text(bx + 10, by + 102, "・履歴ログ表示: Lキー / メッセージバーClick (ゲームオーバー後も閲覧可能)", 11)
-        self.renderer.draw_text(bx + 10, by + 116, "・ESCキー: メニュー（タイトル画面）に戻る", 9)
+        self.renderer.draw_text(bx + 8, by + 4, "【操作ガイド（司令塔モード）】", 10)
+        self.renderer.draw_text(bx + 8, by + 18, "・時間一時停止: マップ空き地クリックで時間停止 ↔ 再開 (右クリック/Space)", 11)
+        self.renderer.draw_text(bx + 8, by + 32, "・設備選択: Tabキー / 設備クリック (選択中も時間が一時停止)", 7)
+        self.renderer.draw_text(bx + 8, by + 46, "・指令送信: Enterキー / [指令送信]ボタン (確定後、時間再開&待機時間)", 10)
+        self.renderer.draw_text(bx + 8, by + 60, "・火力出力: W/S (微増減), Q/E (10MW), A(MIN), D(MAX), スライダー", 7)
+        self.renderer.draw_text(bx + 8, by + 74, "・改良火力: Gキーでガバナフリー(GF)自動調速運転ON/OFF！周波数自律安定化", 11)
+        self.renderer.draw_text(bx + 8, by + 88, "・揚水切替: W(発電), S(揚水充電), A(停止) | 変電所: Spaceで系統開閉盤", 7)
+        self.renderer.draw_text(bx + 8, by + 102, "・設備新設: Bキー / [＋発電所新設]で新設メニューを開き新発電所を着工！", 10)
+        self.renderer.draw_text(bx + 8, by + 116, "・履歴ログ: Lキー / メッセージバーClick | ESCキー: タイトルに戻る", 9)
 
 
 if __name__ == "__main__":
